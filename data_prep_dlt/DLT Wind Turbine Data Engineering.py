@@ -243,7 +243,7 @@ def agg_turbine_gold_view():
 # COMMAND ----------
 
 dlt.create_target_table(
-  name = "streaming_turbine_enriched_gold_table",
+  name = "turbine_enriched",
   comment = "Enriched Turbine telemetry",
   table_properties={
     "pipeline.quality": "gold",
@@ -254,7 +254,7 @@ dlt.create_target_table(
 )
 
 dlt.apply_changes(
-  target = "streaming_turbine_enriched_gold_table",
+  target = "turbine_enriched",
   source = "agg_turbine_gold_view",
   keys = ["date","window","deviceId"],
   sequence_by = col("date"),
