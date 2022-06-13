@@ -1,4 +1,8 @@
 # Databricks notebook source
+# MAGIC %pip install mlflow
+
+# COMMAND ----------
+
 # MAGIC %md ### Instantiate DLT Input Parameters
 
 # COMMAND ----------
@@ -29,6 +33,10 @@ eh_sql = f"kafkashaded.org.apache.kafka.common.security.plain.PlainLoginModule r
 
 import dlt
 from pyspark.sql.functions import col, from_json, to_date, window, avg as spark_avg
+from pyspark.sql import types as t
+import pandas as pd
+import mlflow
+from datetime import timedelta
 
 # COMMAND ----------
 
@@ -50,7 +58,7 @@ def streaming_sensor_raw_table():
           .option("kafka.security.protocol", "SASL_SSL")
           .option("kafka.sasl.jaas.config",eh_sql)
           .option("kafka.group.id",consumer_group)
-          .option("startingOffsets", "earliest")
+          .option("startingOffsets", "latest")
           .option("maxOffsetsPerTrigger", "500")
           .option("failOnDataLoss","false")
           .load()
@@ -263,3 +271,53 @@ dlt.apply_changes(
   column_list = None,
   except_column_list = None
 )
+
+# COMMAND ----------
+
+apply_return_schema = t.StructType([
+    t.StructField("deviceId", t.StringType()),
+    t.StructField("forecast_window", t.TimestampType()),
+    t.StructField("power_forecast_prediction", t.FloatType())
+])
+
+def apply_model(df_pandas: pd.DataFrame) -> pd.DataFrame:
+    """
+    Applies model to data for a particular device, represented as a pandas DataFrame
+    """
+    model_path = df_pandas["model_path"].iloc[0]
+
+    features=["rpm","angle","temperature","humidity","windspeed"]
+    X = df_pandas[features]
+
+    model = mlflow.sklearn.load_model(model_path)
+    prediction = model.predict(X)
+
+    return_df = pd.DataFrame({
+        "forecast_window": df_pandas["window"]+timedelta(hours=1),
+        "deviceId": df_pandas["deviceId"],
+        "power_forecast_prediction": prediction
+    })
+    return return_df
+  
+# Model D
+model_directories_df = spark.table("pasa_demo.turbine_forecast_model")  
+
+# COMMAND ----------
+
+@dlt.table(
+  comment="Power Prediction only",
+  table_properties={
+    "pipeline.quality": "gold",
+    "delta.autoOptimize.optimizeWrite": "true",
+    "delta.autoOptimize.autoCompact": "true",
+  }
+)
+def power_prediction_gold():
+  bronze_df = dlt.read_stream("turbine_enriched")
+  
+  pred_bronze_df = (bronze_df.join(model_directories_df.select("deviceId", "model_path"), how="left", on="deviceId")
+                 .groupby("deviceId")
+                 .applyInPandas(apply_model, schema=apply_return_schema)
+                )
+                
+  return pred_bronze_df
