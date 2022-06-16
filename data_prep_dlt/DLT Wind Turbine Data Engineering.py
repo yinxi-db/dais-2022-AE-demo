@@ -157,7 +157,7 @@ def agg_turbine_silver_view():
   input_df = dlt.read_stream("streaming_turbine_silver_table")
 
   return (input_df
-          .withWatermark("timestamp", "10 minutes")
+          .withWatermark("timestamp", "5 minutes")
           .groupBy('deviceId','date', window('timestamp','5 minutes'))
           .agg(spark_avg('rpm').alias('rpm'), spark_avg("angle").alias("angle"))
          )
@@ -199,7 +199,7 @@ def agg_weather_silver_view():
   input_df = dlt.read_stream("streaming_weather_silver_table")
 
   return (input_df
-          .withWatermark("timestamp", "10 minutes")
+          .withWatermark("timestamp", "5 minutes")
           .groupBy('deviceid','date',window('timestamp','5 minutes'))            
           .agg({"temperature":"avg","humidity":"avg","windspeed":"avg","winddirection":"last"})
           .selectExpr('date','window','deviceid','`avg(temperature)` as temperature','`avg(humidity)` as humidity',
@@ -274,6 +274,10 @@ dlt.apply_changes(
 
 # COMMAND ----------
 
+# MAGIC %md ### Apply ML Predictions (Gold)
+
+# COMMAND ----------
+
 apply_return_schema = t.StructType([
     t.StructField("deviceId", t.StringType()),
     t.StructField("forecast_window", t.TimestampType()),
@@ -299,7 +303,7 @@ def apply_model(df_pandas: pd.DataFrame) -> pd.DataFrame:
     })
     return return_df
   
-# Model D
+# Model mapping location
 model_directories_df = spark.table("pasa_demo.turbine_forecast_model")  
 
 # COMMAND ----------
