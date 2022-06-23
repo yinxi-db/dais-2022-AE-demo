@@ -17,6 +17,7 @@ dbutils.widgets.text("registered_model_name", "wind-farm-anomaly-detection")
 import mlflow
 import tensorflow as tf
 from mlflow.models import infer_signature
+from mlflow.tracking import MlflowClient
 import pandas as pd
 
 tf.random.set_seed(42)
@@ -60,11 +61,26 @@ display(df)
 
 # COMMAND ----------
 
+client = MlflowClient()
+
 features = ["rpm","angle","temperature","humidity","windspeed"]
 ## create model map, load model outside of pyfunc class
 device_model_map= df_model.select("deviceId","mlflow_run_id","threshold").toPandas().set_index("deviceId").to_dict("index")
+device_model_map
+
+# COMMAND ----------
+
+## save to artifact
+artifacts = {}
 for device in device_model_map:
-    device_model_map[device]["model"] = mlflow.pyfunc.load_model(f"""runs:/{device_model_map[device]["mlflow_run_id"]}/model""")
+    artifacts["model-"+device] = client.download_artifacts(run_id=device_model_map[device]["mlflow_run_id"],
+                                                           path="model"
+                                                          )
+artifacts
+
+# COMMAND ----------
+
+mlflow.pyfunc.load_model('/tmp/tmpxahniqav/model').predict(df.select(*features).limit(5).toPandas())
 
 # COMMAND ----------
 
@@ -85,7 +101,12 @@ class GroupByAEWrapperModel(mlflow.pyfunc.PythonModel):
         """
         return df
     
-    
+    def load_context(self, context):
+        self.models = {}
+        for device in self.device_model_map:
+            self.models[device] = mlflow.pyfunc.load_model(context.artifacts["model-"+device])
+        
+        
     def predict(self, context=None, model_input: pd.DataFrame=None):
         def predict_per_device(df_pandas):
             import mlflow
@@ -93,7 +114,7 @@ class GroupByAEWrapperModel(mlflow.pyfunc.PythonModel):
             from mlflow.tracking.client import MlflowClient
             # Pull metadata
             device_id = df_pandas["deviceId"]
-            model = self.device_model_map[device_id]["model"]
+            model = self.models[device_id]
 
             threshold = self.device_model_map[device_id]["threshold"]
             X = pd.DataFrame(data=[[df_pandas[c] for c in self.features]], columns=self.features)
@@ -119,31 +140,31 @@ class GroupByAEWrapperModel(mlflow.pyfunc.PythonModel):
 
 # COMMAND ----------
 
-from sys import version_info
+# from sys import version_info
 
-conda_env = {
-    "channels": ["conda-forge"],
-    "dependencies": [
-        f"python={version_info.major}.{version_info.minor}.{version_info.micro}",
-        "pip",
-        {"pip": ["mlflow",
-                 f"tensorflow=={tf.__version__}",
-                 f"cloudpickle==1.2.2", # Forcing cloudpickle version due to serialization issue
-                 f"keras=={tf.keras.__version__}" # Need both tensorflow and keras due to mlflow dependency 
-                ]
-        },
-    ],
-    "name": "tf_env"
-}
+# conda_env = {
+#     "channels": ["conda-forge"],
+#     "dependencies": [
+#         f"python={version_info.major}.{version_info.minor}.{version_info.micro}",
+#         "pip",
+#         {"pip": ["mlflow",
+#                  f"tensorflow=={tf.__version__}",
+#                  f"cloudpickle==1.2.2", # Forcing cloudpickle version due to serialization issue
+#                  f"keras=={tf.keras.__version__}" # Need both tensorflow and keras due to mlflow dependency 
+#                 ]
+#         },
+#     ],
+#     "name": "tf_env"
+# }
 
-conda_env
+# conda_env
 
 # COMMAND ----------
 
 df_inference = df.select("deviceId", *features)## at inference, we only need turbine id and feature cols
 signature = infer_signature(df_inference.limit(3).toPandas(), ## input data
                             pd.DataFrame(data=[False],
-                                         #columns=["Prediction_is_anomaly"]
+                                         columns=["Prediction_is_anomaly"]
                                         )    ## prediction data
                            )
 model_name = dbutils.widgets.get("registered_model_name")
@@ -153,6 +174,7 @@ with mlflow.start_run() as run:
       artifact_path="groupby_models", 
       input_example = df_inference.limit(3).toPandas(),
       signature=signature,
+      artifacts = artifacts,
       registered_model_name=model_name
     )
 
@@ -171,7 +193,7 @@ imported_model.predict(df_inference.limit(10).toPandas())
 # MAGIC %md
 # MAGIC #### Enable model serving 
 # MAGIC 
-# MAGIC From [the model page](https://adb-6991111357039288.8.azuredatabricks.net/?o=6991111357039288#mlflow/models/yz-AE-groupby-model), click on enable serving to create an Rest Endpoint of the model
+# MAGIC From [the model page](https://db-sme-demo-ml-practice.cloud.databricks.com/?o=2524178410398960#mlflow/models/multimodel-serving/serving), click on enable serving to create an Rest Endpoint of the model
 # MAGIC 
 # MAGIC We can sent queries to the endpoint
 
