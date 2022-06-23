@@ -9,6 +9,23 @@ spark.sql(f"CREATE DATABASE IF NOT EXISTS {db_name}")
 
 # COMMAND ----------
 
+devices = ["WindTurbine-"+str(i) for i in range(int(dbutils.widgets.get("n_device")))]
+
+# COMMAND ----------
+
+dates = {"start":dbutils.widgets.get("start_date"), "end": dbutils.widgets.get("end_date")}
+
+# COMMAND ----------
+
+baselines = {"rpm"          : 6.859119,
+              "angle"       : 5.001729,
+              "temperature" : 25.261187,
+              "humidity"    : 65.941392,
+              "windspeed"   : 6.594139
+            }
+
+# COMMAND ----------
+
 import pandas as pd
 import numpy as np
 
@@ -18,22 +35,15 @@ def generate_series(time_index, baseline, slope=0.01, period=365*24*12):
   season_time = (time_index % period) / period
   seasonal_pattern = np.where(season_time < 0.4, np.cos(season_time * 2 * np.pi), 1 / np.exp(3 * season_time))
   return baseline * (1 + 0.1 * seasonal_pattern + 0.1 * rnd.randn(len(time_index)))
-  
-# Get start and end dates for our historical data
-dates = spark.sql('select max(date)-interval 365 days as start, max(date) as end from pasa_demo.turbine_enriched').toPandas()
-  
-# Get the baseline readings for each sensor for backfilling data
-turbine_enriched_pd = spark.table('pasa_demo.turbine_enriched').toPandas()
-baselines = turbine_enriched_pd.min()[3:8]
-devices = turbine_enriched_pd['deviceId'].unique()
 
 # COMMAND ----------
 
+import pyspark.sql.functions as f
 # Iterate through each device to generate historical data for that device
 print("---Generating Historical Enriched Turbine Readings---")
 for deviceid in devices:
   print(f'Backfilling device {deviceid}')
-  windows = pd.date_range(start=dates['start'][0], end=dates['end'][0], freq='10T') # Generate a list of hourly timestamps from start to end date, 10 mins interval
+  windows = pd.date_range(start=dates['start'], end=dates['end'], freq='10T') # Generate a list of hourly timestamps from start to end date, 10 mins interval
   historical_values = pd.DataFrame({
     'date': windows.date,
     'window': windows, 
@@ -47,9 +57,15 @@ for deviceid in devices:
   # Write dataframe to enriched_readings Delta table
   spark.createDataFrame(historical_values).write.format("delta").mode("append").saveAsTable(f"{db_name}.turbine_enriched")
   
+# spark.sql(f'CREATE TABLE {db_name}.turbine_power USING DELTA PARTITIONED BY (date) AS SELECT date, window, deviceId, 0.1 * (temperature/humidity) * (3.1416 * 25) * windspeed * rpm AS power FROM {db_name}.turbine_enriched')
+
+# COMMAND ----------
+
 # Create power readings based on weather and operating conditions
 print("---Generating Historical Turbine Power Readings---")
-spark.sql(f'CREATE TABLE {db_name}.turbine_power USING DELTA PARTITIONED BY (date) AS SELECT date, window, deviceId, 0.1 * (temperature/humidity) * (3.1416 * 25) * windspeed * rpm AS power FROM {db_name}.turbine_enriched')
+df_power = spark.table(f"{db_name}.turbine_enriched").select("date", "window", "deviceId", 
+                                                             (0.1 * (f.col("temperature")/f.col("humidity")) * (3.1416 * 25) * f.col("windspeed") * f.col("rpm")).alias("power"))
+df_power.write.partitionBy("date").mode("overWrite").saveAsTable(f"{db_name}.turbine_power")
 
 # COMMAND ----------
 
