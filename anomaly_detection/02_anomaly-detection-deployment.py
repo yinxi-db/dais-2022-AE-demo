@@ -8,8 +8,8 @@ dbutils.widgets.removeAll()
 
 # COMMAND ----------
 
-dbutils.widgets.text("score_table_name", "yz.turbine_enriched")
-dbutils.widgets.text("model_table_name", "yz.trained_ae_models")
+dbutils.widgets.text("score_table_name", "yz_dais_2022.turbine_enriched")
+dbutils.widgets.text("model_table_name", "yz_dais_2022.trained_ae_models")
 dbutils.widgets.text("registered_model_name", "wind-farm-anomaly-detection")
 
 # COMMAND ----------
@@ -80,7 +80,7 @@ artifacts
 
 # COMMAND ----------
 
-mlflow.pyfunc.load_model('/tmp/tmpxahniqav/model').predict(df.select(*features).limit(5).toPandas())
+mlflow.pyfunc.load_model('/tmp/tmprv8bijsy/model').predict(df.select(*features).limit(5).toPandas())
 
 # COMMAND ----------
 
@@ -107,7 +107,7 @@ class GroupByAEWrapperModel(mlflow.pyfunc.PythonModel):
             self.models[device] = mlflow.pyfunc.load_model(context.artifacts["model-"+device])
         
         
-    def predict(self, context=None, model_input: pd.DataFrame=None):
+    def predict(self, context, model_input: pd.DataFrame):
         def predict_per_device(df_pandas):
             import mlflow
             import numpy as np

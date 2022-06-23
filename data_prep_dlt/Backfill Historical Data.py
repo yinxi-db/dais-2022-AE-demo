@@ -4,6 +4,17 @@
 
 # COMMAND ----------
 
+dbutils.widgets.removeAll()
+
+# COMMAND ----------
+
+dbutils.widgets.text("database","yz_dais_2022")
+dbutils.widgets.text("n_device","10")
+dbutils.widgets.text("start_date","2021-06-01")
+dbutils.widgets.text("end_date","2022-06-01")
+
+# COMMAND ----------
+
 db_name = dbutils.widgets.get("database")
 spark.sql(f"CREATE DATABASE IF NOT EXISTS {db_name}")
 

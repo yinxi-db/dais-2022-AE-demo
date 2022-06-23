@@ -8,10 +8,10 @@ dbutils.widgets.removeAll()
 
 # COMMAND ----------
 
-dbutils.widgets.text("sensor_table_name", "yz.turbine_enriched")
-dbutils.widgets.text("maintenance_table_name", "yz.turbine_maintenance")
+dbutils.widgets.text("sensor_table_name", "yz_dais_2022.turbine_enriched")
+dbutils.widgets.text("maintenance_table_name", "yz_dais_2022.turbine_maintenance")
 dbutils.widgets.text("mlflow_exp_root_path","/Users/yinxi.zhang@databricks.com")
-dbutils.widgets.text("result_output_table","yz.trained_ae_models")
+dbutils.widgets.text("result_output_table","yz_dais_2022.trained_ae_models")
 
 # COMMAND ----------
 
@@ -58,15 +58,11 @@ display(df)
 
 ## for the simplicity of demo, use the same dataset as validation data
 val_sensor_table = sensor_table
-val_maintenance_table = maitenance_table
+val_maintenance_table = maintenance_table
 df_val = spark.table(val_sensor_table).join(spark.table(val_maintenance_table), 
                                     how="left",
                                     on=["deviceId", "date"]
                                    ).fillna(False)
-
-# COMMAND ----------
-
-
 
 # COMMAND ----------
 
