@@ -140,24 +140,35 @@ class GroupByAEWrapperModel(mlflow.pyfunc.PythonModel):
 
 # COMMAND ----------
 
-# from sys import version_info
+from sys import version_info
 
-# conda_env = {
-#     "channels": ["conda-forge"],
-#     "dependencies": [
-#         f"python={version_info.major}.{version_info.minor}.{version_info.micro}",
-#         "pip",
-#         {"pip": ["mlflow",
-#                  f"tensorflow=={tf.__version__}",
-#                  f"cloudpickle==1.2.2", # Forcing cloudpickle version due to serialization issue
-#                  f"keras=={tf.keras.__version__}" # Need both tensorflow and keras due to mlflow dependency 
-#                 ]
-#         },
-#     ],
-#     "name": "tf_env"
-# }
+conda_env = {
+    "channels": ["conda-forge"],
+    "dependencies": [
+        f"python={version_info.major}.{version_info.minor}.{version_info.micro}",
+        "pip",
+        {"pip": [
+                "mlflow",
+                "boto3==1.16.7",
+                "cffi==1.14.5",
+                "cloudpickle==1.6.0",
+                "configparser==5.0.1",
+                "dill==0.3.2",
+                "fsspec==0.9.0",
+                "pandas==1.2.4",
+                "pillow==8.2.0",
+                "psutil==5.8.0",
+                "pyspark==3.2.1",
+                "scipy==1.6.2",
+                "tensorflow-cpu==2.8.0",
+                "protobuf<4.0.0"
+                ]
+        },
+    ],
+    "name": "tf_env"
+}
 
-# conda_env
+conda_env
 
 # COMMAND ----------
 
@@ -175,7 +186,8 @@ with mlflow.start_run() as run:
       input_example = df_inference.limit(3).toPandas(),
       signature=signature,
       artifacts = artifacts,
-      registered_model_name=model_name
+      registered_model_name=model_name,
+      conda_env=conda_env
     )
 
 # COMMAND ----------
@@ -196,6 +208,29 @@ imported_model.predict(df_inference.limit(10).toPandas())
 # MAGIC From [the model page](https://db-sme-demo-ml-practice.cloud.databricks.com/?o=2524178410398960#mlflow/models/multimodel-serving/serving), click on enable serving to create an Rest Endpoint of the model
 # MAGIC 
 # MAGIC We can sent queries to the endpoint
+
+# COMMAND ----------
+
+import os
+import requests
+import numpy as np
+import pandas as pd
+
+def create_tf_serving_json(data):
+  return {'inputs': {name: data[name].tolist() for name in data.keys()} if isinstance(data, dict) else data.tolist()}
+
+def score_model(dataset):
+  url = 'https://db-sme-demo-ml-practice.cloud.databricks.com/model-endpoint/wind-farm-anomaly-detection/1/invocations'
+  headers = {'Authorization': f'Bearer {os.environ.get("DATABRICKS_TOKEN")}'}
+  data_json = dataset.to_dict(orient='split') if isinstance(dataset, pd.DataFrame) else create_tf_serving_json(dataset)
+  response = requests.request(method='POST', headers=headers, url=url, json=data_json)
+  if response.status_code != 200:
+    raise Exception(f'Request failed with status {response.status_code}, {response.text}')
+  return response.json()
+
+# COMMAND ----------
+
+score_model(df_inference.limit(3).toPandas())
 
 # COMMAND ----------
 

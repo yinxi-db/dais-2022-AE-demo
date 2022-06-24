@@ -90,9 +90,17 @@ df_val = spark.table(val_sensor_table).join(spark.table(val_maintenance_table),
 
 from mlflow.tracking import MlflowClient
 mlflow_exp_root_path = dbutils.widgets.get("mlflow_exp_root_path")
-# Create an experiment with a name that is unique and case sensitive.
 client = MlflowClient()
-experiment_id = client.create_experiment(f"{mlflow_exp_root_path}/anomaly_detection_wind_turbines")
+
+## Test if experiment already exists
+exp_name = f"{mlflow_exp_root_path}/anomaly_detection_wind_turbines"
+if exp_name in [x.name for x in client.list_experiments()]:
+    exp = mlflow.set_experiment(exp_name)
+    experiment_id = exp.experiment_id
+else:
+    ## Create an experiment for runs started from a repo notebook
+    experiment_id = client.create_experiment(f"{mlflow_exp_root_path}/anomaly_detection_wind_turbines")
+experiment_id
 
 # COMMAND ----------
 
