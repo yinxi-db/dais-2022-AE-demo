@@ -8,8 +8,8 @@ dbutils.widgets.removeAll()
 
 # COMMAND ----------
 
-dbutils.widgets.text("score_table_name", "dais_2022_demo.turbine_enriched")
-dbutils.widgets.text("model_table_name", "dais_2022_demo.trained_ae_models")
+dbutils.widgets.text("score_table_name", "yz_dais_2022.turbine_enriched")
+dbutils.widgets.text("model_table_name", "yz_dais_2022.trained_ae_models")
 dbutils.widgets.text("registered_model_name", "wind-farm-anomaly-detection")
 
 # COMMAND ----------
@@ -25,8 +25,10 @@ tf.random.set_seed(42)
 print(mlflow.__version__)
 print(tf.__version__)
 
-mlflow.tensorflow.autolog()
-## mlflow.tensorflow.autolog(log_input_examples=True, log_model_signatures=True) # mlflow 1.25 release
+if int(mlflow.__version__.split(".")[1])<25:
+    mlflow.tensorflow.autolog()
+else:
+    mlflow.tensorflow.autolog(log_input_examples=True, log_model_signatures=True) # mlflow 1.25 release
 
 # COMMAND ----------
 
@@ -66,17 +68,11 @@ client = MlflowClient()
 features = ["rpm","angle","temperature","humidity","windspeed"]
 ## create model map, load model outside of pyfunc class
 device_model_map= df_model.select("deviceId","mlflow_run_id","threshold").toPandas().set_index("deviceId").to_dict("index")
-device_model_map
 
-# COMMAND ----------
-
-## save to artifact
-artifacts = {}
 for device in device_model_map:
-    artifacts["model-"+device] = client.download_artifacts(run_id=device_model_map[device]["mlflow_run_id"],
-                                                           path="model"
-                                                          )
-artifacts
+    device_model_map[device]["model"] = mlflow.pyfunc.load_model(f"""runs:/{device_model_map[device]['mlflow_run_id']}/model""")
+
+device_model_map
 
 # COMMAND ----------
 
@@ -85,20 +81,15 @@ artifacts
 
 # COMMAND ----------
 
-import os
-os.listdir('/tmp/tmpivzdvb54/model')
+# import yaml
 
-# COMMAND ----------
-
-import yaml
-
-## import model dependencies
-yaml_path = artifacts["model-WindTurbine-5"]+"/conda.yaml" ## choose any individual model artifact
-with open(yaml_path) as f:
-    conda_env = yaml.safe_load(f)
-## force protobuf version    
-conda_env["dependencies"][-1]["pip"].append("protobuf<4.0.0")
-conda_env
+# ## import model dependencies
+# yaml_path = artifacts["model-WindTurbine-5"]+"/conda.yaml" ## choose any individual model artifact
+# with open(yaml_path) as f:
+#     conda_env = yaml.safe_load(f)
+# ## force protobuf version    
+# conda_env["dependencies"][-1]["pip"].append("protobuf<4.0.0")
+# conda_env
 
 # COMMAND ----------
 
@@ -118,12 +109,6 @@ class GroupByAEWrapperModel(mlflow.pyfunc.PythonModel):
         implement featurization logic here
         """
         return df
-    
-    def load_context(self, context):
-        self.models = {}
-        for device in self.device_model_map:
-            self.models[device] = mlflow.pyfunc.load_model(context.artifacts["model-"+device])
-        
         
     def predict(self, context, model_input: pd.DataFrame):
         def predict_per_device(df_pandas):
@@ -132,7 +117,7 @@ class GroupByAEWrapperModel(mlflow.pyfunc.PythonModel):
             from mlflow.tracking.client import MlflowClient
             # Pull metadata
             device_id = df_pandas["deviceId"]
-            model = self.models[device_id]
+            model = self.device_model_map[device_id]["model"]
 
             threshold = self.device_model_map[device_id]["threshold"]
             X = pd.DataFrame(data=[[df_pandas[c] for c in self.features]], columns=self.features)
@@ -171,12 +156,15 @@ with mlflow.start_run() as run:
       artifact_path="groupby_models", 
       input_example = df_inference.limit(3).toPandas(),
       signature=signature,
-      artifacts = artifacts,
+      #artifacts = artifacts,
       registered_model_name=model_name,
-      conda_env=conda_env
+      extra_pip_requirements=["protobuf<4.0.0"]
     )
+
+# COMMAND ----------
+
 ## promote version to "Production"
-latest_version = client.get_latest_versions("tmp_test",["None"])[0].version
+latest_version = client.get_latest_versions(model_name,["None"])[0].version
 client.transition_model_version_stage(model_name, latest_version, "Production", archive_existing_versions=True)
 
 # COMMAND ----------
